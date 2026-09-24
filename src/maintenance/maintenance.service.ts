@@ -4,6 +4,7 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import type { JwtPayload } from '../auth/strategies/jwt.strategy.js';
 import { Role } from '../generated/prisma/enums.js';
 import { PrismaService } from '../prisma/prisma.service.js';
@@ -12,7 +13,10 @@ import { UpdateMaintenanceDto } from './dto/update-maintenance.dto.js';
 
 @Injectable()
 export class MaintenanceService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly configService: ConfigService,
+  ) {}
 
   create(dto: CreateMaintenanceDto, user: JwtPayload) {
     return this.prisma.maintenanceOrder.create({
@@ -50,18 +54,26 @@ export class MaintenanceService {
         mechanic: { select: { id: true, name: true } },
       },
     });
+
     if (!order) throw new NotFoundException(`Orden ${id} no encontrada`);
+
     if (user.role === Role.CUSTOMER && order.customerId !== user.sub) {
       throw new ForbiddenException('No puedes ver órdenes de otros clientes');
     }
-    return { ...order, currency: process.env.CURRENCY };
+
+    return {
+      ...order,
+      currency: this.configService.getOrThrow<string>('CURRENCY'),
+    };
   }
 
   async update(id: number, dto: UpdateMaintenanceDto, user: JwtPayload) {
     const order = await this.prisma.maintenanceOrder.findUnique({
       where: { id },
     });
+
     if (!order) throw new NotFoundException(`Orden ${id} no encontrada`);
+
     if (user.role === Role.MECHANIC && order.mechanicId !== user.sub) {
       throw new ForbiddenException('Esta orden no está asignada a ti');
     }
@@ -70,6 +82,7 @@ export class MaintenanceService {
       const mechanic = await this.prisma.user.findUnique({
         where: { id: dto.mechanicId },
       });
+
       if (!mechanic || mechanic.role !== Role.MECHANIC) {
         throw new BadRequestException(
           `El usuario ${dto.mechanicId} no existe o no es mecánico`,
