@@ -3,6 +3,7 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import bcrypt from 'bcryptjs';
 import { RegisterDto } from '../auth/dto/register.dto.js';
 import { Role } from '../generated/prisma/enums.js';
@@ -18,29 +19,45 @@ const safeSelect = {
 
 @Injectable()
 export class UsersService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly configService: ConfigService,
+  ) {}
 
   async create(dto: RegisterDto) {
     const exists = await this.prisma.user.findUnique({
       where: { email: dto.email },
     });
-    if (exists) throw new ConflictException('El email ya está registrado');
 
-    const saltRounds = parseInt(process.env.BCRYPT_SALT_ROUNDS ?? '10', 10);
+    if (exists) {
+      throw new ConflictException('El email ya está registrado');
+    }
+
+    const saltRounds =
+      this.configService.getOrThrow<number>('BCRYPT_SALT_ROUNDS');
+
     const password = await bcrypt.hash(dto.password, saltRounds);
 
     return this.prisma.user.create({
-      data: { name: dto.name, email: dto.email, password },
+      data: {
+        name: dto.name,
+        email: dto.email,
+        password,
+      },
       select: safeSelect,
     });
   }
 
   findByEmail(email: string) {
-    return this.prisma.user.findUnique({ where: { email } });
+    return this.prisma.user.findUnique({
+      where: { email },
+    });
   }
 
   findAll() {
-    return this.prisma.user.findMany({ select: safeSelect });
+    return this.prisma.user.findMany({
+      select: safeSelect,
+    });
   }
 
   async findOne(id: number) {
@@ -48,12 +65,17 @@ export class UsersService {
       where: { id },
       select: safeSelect,
     });
-    if (!user) throw new NotFoundException(`Usuario ${id} no encontrado`);
+
+    if (!user) {
+      throw new NotFoundException(`Usuario ${id} no encontrado`);
+    }
+
     return user;
   }
 
   async updateRole(id: number, role: Role) {
     await this.findOne(id);
+
     return this.prisma.user.update({
       where: { id },
       data: { role },
